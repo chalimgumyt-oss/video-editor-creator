@@ -1,0 +1,209 @@
+import os
+import tkinter as tk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
+
+from moviepy.editor import (
+    AudioFileClip,
+    CompositeVideoClip,
+    ImageClip,
+    TextClip,
+    VideoFileClip,
+    concatenate_audioclips,
+    concatenate_videoclips,
+    afx,
+)
+
+
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+
+class VideoCreatorApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Monteur vidéo simple")
+        self.root.geometry("720x520")
+        self.root.minsize(620, 480)
+
+        self.media_paths = []
+        self.music_path = ""
+        self.output_path = ""
+
+        main = ttk.Frame(root, padding=16)
+        main.pack(fill="both", expand=True)
+
+        ttk.Label(main, text="Ajouter des vidéos/images", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+
+        buttons_row = ttk.Frame(main)
+        buttons_row.pack(fill="x", pady=(8, 8))
+        ttk.Button(buttons_row, text="Ajouter des médias", command=self.add_media).pack(side="left", padx=(0, 8))
+        ttk.Button(buttons_row, text="Retirer la sélection", command=self.remove_selected).pack(side="left")
+
+        self.listbox = tk.Listbox(main, height=12, activestyle="none")
+        self.listbox.pack(fill="both", expand=True)
+
+        form = ttk.Frame(main)
+        form.pack(fill="x", pady=(12, 0))
+
+        ttk.Label(form, text="Titre :").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=6)
+        self.title_var = tk.StringVar(value="Ma vidéo")
+        ttk.Entry(form, textvariable=self.title_var, width=40).grid(row=0, column=1, sticky="ew")
+
+        ttk.Label(form, text="Résolution :").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=6)
+        self.resolution_var = tk.StringVar(value="1080p")
+        ttk.Combobox(
+            form,
+            textvariable=self.resolution_var,
+            values=["720p", "1080p", "4K"],
+            state="readonly",
+            width=18,
+        ).grid(row=1, column=1, sticky="w")
+
+        ttk.Label(form, text="Musique :").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=6)
+        self.music_var = tk.StringVar(value="Aucune")
+        ttk.Entry(form, textvariable=self.music_var, state="readonly", width=40).grid(row=2, column=1, sticky="ew")
+        ttk.Button(form, text="Choisir", command=self.choose_music).grid(row=2, column=2, padx=(8, 0))
+
+        ttk.Label(form, text="Sortie :").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=6)
+        self.output_var = tk.StringVar(value="")
+        ttk.Entry(form, textvariable=self.output_var, state="readonly", width=40).grid(row=3, column=1, sticky="ew")
+        ttk.Button(form, text="Dossier", command=self.choose_output).grid(row=3, column=2, padx=(8, 0))
+
+        form.columnconfigure(1, weight=1)
+
+        actions = ttk.Frame(main)
+        actions.pack(fill="x", pady=(14, 0))
+        ttk.Button(actions, text="Créer la vidéo", command=self.build_video).pack(side="right")
+
+    def add_media(self):
+        paths = filedialog.askopenfilenames(
+            title="Choisir des vidéos ou images",
+            filetypes=[
+                ("Médias", "*.mp4 *.mov *.avi *.mkv *.webm *.jpg *.jpeg *.png *.webp *.bmp"),
+                ("Tous les fichiers", "*.*"),
+            ],
+        )
+        if not paths:
+            return
+
+        for path in paths:
+            if path not in self.media_paths:
+                self.media_paths.append(path)
+                self.listbox.insert(tk.END, Path(path).name)
+
+    def remove_selected(self):
+        selection = self.listbox.curselection()
+        if not selection:
+            return
+        for index in reversed(selection):
+            self.listbox.delete(index)
+            del self.media_paths[index]
+
+    def choose_music(self):
+        path = filedialog.askopenfilename(
+            title="Choisir une musique",
+            filetypes=[("Audio", "*.mp3 *.wav *.m4a *.ogg *.aac"), ("Tous les fichiers", "*.*")],
+        )
+        if not path:
+            return
+        self.music_path = path
+        self.music_var.set(Path(path).name)
+
+    def choose_output(self):
+        folder = filedialog.askdirectory(title="Choisir le dossier de sortie")
+        if not folder:
+            return
+        self.output_path = folder
+        self.output_var.set(folder)
+
+    def get_resolution(self):
+        choice = self.resolution_var.get()
+        mapping = {
+            "720p": (1280, 720),
+            "1080p": (1920, 1080),
+            "4K": (3840, 2160),
+        }
+        return mapping.get(choice, (1920, 1080))
+
+    def load_clip(self, file_path):
+        suffix = Path(file_path).suffix.lower()
+        if suffix in VIDEO_EXTENSIONS:
+            clip = VideoFileClip(file_path)
+            return clip
+        if suffix in IMAGE_EXTENSIONS:
+            clip = ImageClip(file_path).set_duration(3)
+            return clip
+        raise ValueError(f"Format non pris en charge : {file_path}")
+
+    def build_video(self):
+        if not self.media_paths:
+            messagebox.showerror("Erreur", "Ajoute au moins un fichier vidéo ou image.")
+            return
+
+        if not self.output_path:
+            default_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+            self.output_path = default_dir
+            self.output_var.set(default_dir)
+
+        try:
+            clips = []
+            for item in self.media_paths:
+                clip = self.load_clip(item)
+                clips.append(clip)
+
+            if not clips:
+                raise ValueError("Aucun média valide trouvé.")
+
+            final_clip = concatenate_videoclips(clips, method="compose")
+            final_clip = final_clip.resize(self.get_resolution())
+            final_clip = final_clip.without_audio()
+
+            title = self.title_var.get().strip()
+            if title:
+                font_name = "Arial" if os.name == "nt" else "DejaVu-Sans"
+                title_clip = (
+                    TextClip(
+                        title,
+                        font=font_name,
+                        fontsize=60,
+                        color="white",
+                        stroke_color="black",
+                        stroke_width=2,
+                        method="label",
+                    )
+                    .with_position(("center", "center"))
+                    .with_duration(final_clip.duration)
+                )
+                final_clip = CompositeVideoClip([final_clip, title_clip])
+
+            if self.music_path:
+                music = AudioFileClip(self.music_path)
+                music = afx.volumex(music, 0.25)
+                if music.duration < final_clip.duration:
+                    loops = int(final_clip.duration / music.duration) + 1
+                    looped_music = concatenate_audioclips([music] * loops)
+                    music = looped_music.subclip(0, final_clip.duration)
+                else:
+                    music = music.subclip(0, final_clip.duration)
+                final_clip = final_clip.set_audio(music)
+
+            output_file = Path(self.output_path) / "video_finale.mp4"
+            final_clip.write_videofile(
+                str(output_file),
+                fps=30,
+                codec="libx264",
+                audio_codec="aac",
+                temp_audiofile="temp_audio.m4a",
+                remove_temp=True,
+            )
+
+            messagebox.showinfo("Succès", f"Vidéo créée : {output_file}")
+        except Exception as exc:
+            messagebox.showerror("Erreur", f"Impossible de créer la vidéo :\n{exc}")
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = VideoCreatorApp(root)
+    root.mainloop()
